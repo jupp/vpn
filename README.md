@@ -1,0 +1,2 @@
+    docker run -v ovpn-data:/etc/openvpn --rm -it kylemanna/openvpn easyrsa build-client-full $USER nopass
+    docker run -v ovpn-data:/etc/openvpn --rm kylemanna/openvpn ovpn_getclient $USER > $USER.ovpn

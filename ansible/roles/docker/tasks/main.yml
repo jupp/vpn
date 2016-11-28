@@ -1,0 +1,39 @@
+---
+
+- name: ensure APT works with https method, and that CA certificates are installed
+  apt: name={{ item }} state=latest
+  with_items:
+    - apt-transport-https
+    - ca-certificates
+
+- name: add the new GPG key
+  apt_key: keyserver=hkp://p80.pool.sks-keyservers.net:80 id=58118E89F3A912897C070ADBF76221572C52609D
+
+- name: add docker repository
+  apt_repository: >
+    repo='deb https://apt.dockerproject.org/repo ubuntu-xenial main'
+    state=present
+    filename='docker'
+    update_cache=yes
+
+- name: install kernel extra packages
+  apt: name={{ item }} state=latest
+  with_items:
+    - linux-image-extra-{{ ansible_kernel }}
+    - linux-image-extra-virtual
+
+- name: create the docker group
+  group: name=docker state=present
+
+- name: add user to docker group
+  user: name={{ ansible_user }} groups=docker append=yes
+
+- name: make /etc/docker directory
+  file: path=/etc/docker state=directory mode=0755
+
+- name: copy docker daemon configuration
+  copy: src=daemon.json dest=/etc/docker/daemon.json
+  # notify: Restart docker daemon
+
+- name: install docker
+  apt: name=docker-engine state=latest

@@ -1,0 +1,11 @@
+---
+
+- hosts: all
+  become: true
+  vars_prompt:
+    - name: "pem_pass_phrase"
+      prompt: "Enter PEM pass phrase"
+      private: yes
+      default: "CHANGE_ME"
+  roles:
+    - openvpn

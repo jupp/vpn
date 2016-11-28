@@ -1,0 +1,137 @@
+---
+- hosts: all
+  become: true
+  gather_facts: no
+  vars:
+    openvpn_data: "ovpn-data"
+  tasks:
+    - name: Install python 2
+      raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+    
+    - name: Gather facts
+      become: false
+      setup:
+
+    - name: Update repositories cache
+      apt: update_cache=yes
+    
+    - name: Ensure a locale exists
+      locale_gen: name=en_US.UTF-8
+
+    - name: Set locale variables
+      become: false
+      lineinfile: >
+        dest="{{ ansible_env.HOME }}/.bashrc"
+        line="export {{ item }}"
+        insertafter=EOF
+        state=present
+      with_items:
+        - "LANG=en_US.UTF-8"
+        - "LANGUAGE=en_US:en"
+        - "LC_ALL=en_US.UTF-8"
+
+    - name: Ensure APT works with https method, and that CA certificates are installed
+      apt: name={{ item }} state=latest
+      with_items:
+        - apt-transport-https
+        - ca-certificates
+
+    - name: Add the new GPG key
+      apt_key: keyserver=hkp://p80.pool.sks-keyservers.net:80 id=58118E89F3A912897C070ADBF76221572C52609D
+
+    - name: Add docker repository
+      apt_repository: >
+        repo='deb https://apt.dockerproject.org/repo ubuntu-xenial main'
+        state=present
+        filename='docker'
+        update_cache=yes
+
+    - name: Install kernel extra packages
+      apt: name={{ item }} state=latest
+      with_items:
+        - linux-image-extra-{{ ansible_kernel }}
+        - linux-image-extra-virtual
+
+    - name: Create the docker group
+      group: name=docker state=present
+
+    - name: Add user to docker group
+      user: name={{ ansible_user }} groups=docker append=yes
+
+    - name: Make /etc/docker directory
+      file: path=/etc/docker state=directory mode=0755
+
+    - name: Copy docker daemon configuration
+      copy: src=daemon.json dest=/etc/docker/daemon.json
+      # notify: Restart docker daemon
+
+    - name: Install docker
+      apt: name=docker-engine state=latest
+
+    - name: Create alias for glances container
+      become: false
+      lineinfile: >
+        dest="{{ ansible_env.HOME }}/.bashrc"
+        line="alias glances='docker run --name glances --rm -v /var/run/docker.sock:/var/run/docker.sock:ro --pid host -it docker.io/nicolargo/glances'"
+        insertafter=EOF
+        state=present
+
+    - name: Install htop
+      package: name=htop state=latest
+
+    - name: Set OVPN_DATA variable
+      become: false
+      lineinfile: >
+        dest="{{ ansible_env.HOME }}/.bashrc"
+        line="export OVPN_DATA={{ openvpn_data }}"
+        insertafter=EOF
+        state=present
+
+    - name: Install pip
+      package: name=python-pip state=latest
+
+    - name: Upgrade pip
+      command: /usr/bin/pip install --upgrade pip
+
+    - name: Install docker-py
+      command: /usr/bin/pip install docker-py==1.7.2
+
+    - name: Create openvpn configuration
+      docker_container:
+        name: ovpn_genconfig
+        image: kylemanna/openvpn
+        command: ovpn_genconfig -u udp://{{ ansible_default_ipv4.address }}
+        volumes:
+          - "{{ openvpn_data }}:/etc/openvpn"
+        pull: true
+        detach: false
+
+    - name: Remove ovpn_genconfig container
+      docker_container:
+        name: ovpn_genconfig
+        state: absent
+    
+    - name: Install pexpect
+      command: /usr/bin/pip install pexpect
+
+    - name: Init PKI
+      expect:
+        command: docker run -v {{ openvpn_data }}:/etc/openvpn --rm -it kylemanna/openvpn ovpn_initpki
+        timeout: 600
+        responses:
+          "Confirm removal:": "yes"
+          "Common Name": "{{ ansible_default_ipv4.address }}"
+          "Enter PEM pass phrase": "^f$i5A3v0!v7pdTsq"
+          "Enter pass phrase for /etc/openvpn/pki/private/ca.key": "^f$i5A3v0!v7pdTsq"
+
+    - name: Start openvpn server
+      docker_container:
+        name: openvpn
+        image: kylemanna/openvpn
+        volumes:
+          - "{{ openvpn_data }}:/etc/openvpn"
+        published_ports:
+          - 1194:1194/udp
+        capabilities:
+          - NET_ADMIN
+        restart_policy: unless-stopped

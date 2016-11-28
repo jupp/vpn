@@ -1,0 +1,7 @@
+---
+
+- name: enable and disable everything
+  ufw: state=enabled policy=reject
+
+- name: limit ssh
+  ufw: rule=limit port=ssh proto=tcp

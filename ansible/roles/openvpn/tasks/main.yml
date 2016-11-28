@@ -1,0 +1,50 @@
+---
+
+- name: install pip
+  package: name=python-pip state=latest
+
+- name: upgrade pip
+  command: /usr/bin/pip install --upgrade pip
+
+- name: install docker-py
+  command: /usr/bin/pip install --upgrade docker-py
+
+- name: create openvpn configuration
+  docker_container:
+    name: ovpn_genconfig
+    image: kylemanna/openvpn
+    command: ovpn_genconfig -u udp://{{ ansible_default_ipv4.address }}
+    volumes:
+      - "{{ openvpn_data }}:/etc/openvpn"
+    pull: true
+    detach: false
+
+- name: remove ovpn_genconfig container
+  docker_container:
+    name: ovpn_genconfig
+    state: absent
+
+- name: install pexpect
+  command: /usr/bin/pip install pexpect
+
+- name: init PKI
+  expect:
+    command: docker run -v {{ openvpn_data }}:/etc/openvpn --rm -it kylemanna/openvpn ovpn_initpki
+    timeout: 600
+    responses:
+      "Confirm removal:": "yes"
+      "Common Name": "{{ ansible_default_ipv4.address }}"
+      "Enter PEM pass phrase": "{{ pem_pass_phrase }}"
+      "Enter pass phrase for /etc/openvpn/pki/private/ca.key": "{{ pem_pass_phrase }}"
+
+- name: start openvpn server
+  docker_container:
+    name: openvpn
+    image: kylemanna/openvpn
+    volumes:
+      - "{{ openvpn_data }}:/etc/openvpn"
+    published_ports:
+      - 1194:1194/udp
+    capabilities:
+      - NET_ADMIN
+    restart_policy: unless-stopped
